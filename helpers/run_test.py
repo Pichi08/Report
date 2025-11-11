@@ -12,6 +12,12 @@ import matplotlib.pyplot as plt
 import matplotlib
 import warnings
 import os
+import sys
+
+# Add parent directory to path so we can import from objects and config
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 # Try to import tqdm for progress bar, fallback if not available
 try:
