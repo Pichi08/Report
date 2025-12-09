@@ -18,60 +18,23 @@ This project investigates the ant sorting problem, where autonomous agents must 
 
 ### 1.1 Grid World
 
-The simulation environment consists of a 2D bounded grid where agents (ants) interact with colored objects:
-
-- **Grid Configuration:**
-  - Size: 10×10 (RL experiments) or 20×20 (baseline experiments)
-  - Bounded grid (no wrapping)
-  - Objects randomly placed with configurable fill percentage (20-40%)
-  - Multiple color types (1-3 colors depending on experiment)
-
-- **Object Distribution:**
-  - Random initial placement
-  - Even distribution across colors
-  - Fill percentage determines density (sparse: 20%, dense: 40%)
+The simulation environment consists of a 2D bounded grid where agents interact with colored objects. Grid sizes vary by experiment: reinforcement learning uses 10×10 grids, while baseline experiments use 20×20 grids to accommodate multiple simultaneous agents. The grid has no wrapping, creating a finite bounded workspace. Objects are randomly placed with configurable fill percentages (20-40%), where 20% represents sparse and 40% represents dense configurations. Initial placement ensures even distribution across color types, supporting experiments with 1-3 colors for both clustering (single color) and sorting (multiple colors) tasks.
 
 ### 1.2 Agent Capabilities
 
-Each ant agent can:
-- **Observe:** 3×3 local neighborhood (9 cells) + carrying state
-- **Move:** Up, down, left, right (4 directions)
-- **Interact:** Pick up items, drop items, or perform no-op
-- **State:** Track whether currently carrying an item and its color
+Each ant agent observes a 3×3 local neighborhood (9 cells) and tracks its carrying state, knowing whether it holds an item and its color. Movement is restricted to four cardinal directions (up, down, left, right), creating a discrete action space. Agents can pick up items from their current cell, drop items onto empty cells, or perform a no-op action to remain stationary. Throughout operation, agents maintain awareness of their internal state, specifically whether they are carrying an item and its color identity.
 
 ### 1.3 Observation Space
 
-For RL agents, the observation includes:
-- **Vision:** 3×3 neighborhood encoded as one-hot vectors (empty + color types)
-- **Carrying State:** One-hot encoding of current item (or empty)
-- **Match Signals:** 9 binary signals indicating if each neighbor matches held item
-- **Memory (optional):** Last action taken (for momentum experiments)
-
-**Example:** For 2 colors, input size = `(10 × 3) + 9 + 7 = 46` features
+For reinforcement learning agents, the observation vector combines multiple components: the 3×3 neighborhood encoded as one-hot vectors (empty + color types), the carrying state as a one-hot vector, and 9 binary match signals indicating whether each neighbor matches the held item's color. In momentum experiments, the observation includes the last action taken as a one-hot vector, helping break symmetry and stabilize movement. For example, a 2-color sorting task with momentum yields 46 features: (10 cells × 3 states) + 9 match signals + 7 action memory slots.
 
 ### 1.4 Action Space
 
-7 discrete actions:
-- 0-3: Move (up, down, left, right)
-- 4: Pick item
-- 5: Drop item
-- 6: No-op
-
-Actions are masked to prevent invalid operations (e.g., picking when empty, dropping when carrying).
+The action space consists of 7 discrete actions: 4 movement directions (actions 0-3), pick item (action 4), drop item (action 5), and no-op (action 6). Actions are masked to prevent invalid operations, such as picking when already carrying, dropping when empty, or moving outside grid boundaries. This masking mechanism guides exploration toward valid behaviors and improves learning efficiency.
 
 ### 1.5 Clustering Quality Metric
 
-The primary evaluation metric measures how well similar items are clustered:
-
-```
-Clustering Score = (Sum of adjacent matching pairs) / (Total items)
-```
-
-- **Range:** 0.0 to 1.0
-- **Interpretation:**
-  - 0.0: No adjacent matching pairs (random distribution)
-  - 1.0: Perfect clustering (all items adjacent to same-color neighbors)
-- **Note:** This metric measures clustering but doesn't explicitly penalize mixed-color clusters in sorting tasks.
+The primary evaluation metric calculates clustering quality as the ratio of adjacent matching pairs to total items. The metric counts horizontally or vertically adjacent cells containing items of the same color, normalized by total item count for comparability across densities. Scores range from 0.0 (random distribution) to 1.0 (perfect clustering). However, this metric measures clustering but does not explicitly penalize mixed-color clusters in sorting tasks, which becomes a limitation when evaluating multi-color sorting performance where color separation is the true objective.
 
 ---
 
@@ -79,201 +42,47 @@ Clustering Score = (Sum of adjacent matching pairs) / (Total items)
 
 ### 2.1 Rule-Based Baseline (Deneubourg Model)
 
-#### 2.1.1 Approach
+The baseline implements classical ant clustering rules based on local similarity. The pick rule uses `P_pick = (k1 / (k1 + similarity))²`, where higher probability occurs when local similarity is low (item doesn't fit), with parameter k1 controlling pick sensitivity. The drop rule uses `P_drop = (similarity / (k2 + similarity))²`, where higher probability occurs when local similarity is high (item fits well), with parameter k2 controlling drop sensitivity. Movement follows random 8-directional patterns including diagonals.
 
-The baseline uses classical ant clustering rules based on local similarity:
-
-**Pick Rule:**
-```
-P_pick = (k1 / (k1 + similarity))²
-```
-- Higher probability when local similarity is low (item doesn't fit)
-- Parameter k1 controls pick sensitivity
-
-**Drop Rule:**
-```
-P_drop = (similarity / (k2 + similarity))²
-```
-- Higher probability when local similarity is high (item fits well)
-- Parameter k2 controls drop sensitivity
-
-**Movement:** Random 8-directional movement (including diagonals)
-
-#### 2.1.2 Implementation
-
-- Multiple ants operate simultaneously (5, 10, or 20 ants)
-- Each ant makes independent pick/drop decisions based on local neighborhood
-- No learning or adaptation
-- Deterministic probabilistic rules
-
-#### 2.1.3 Results
+Multiple ants operate simultaneously (5, 10, or 20 ants), each making independent pick/drop decisions based on their local neighborhood. The system uses deterministic probabilistic rules with no learning or adaptation. Parameter sweeps tested K1 ∈ [0.1, 0.3, 0.5, 0.7] and K2 ∈ [0.05, 0.15, 0.25, 0.35], yielding clustering quality ranges of 0.3-0.6 depending on parameters. More ants generally improve performance, though optimal parameters vary with grid configuration.
 
 ![Rule-Based Baseline Results](results/clustering_quality_matrix.png)
 
-**Parameter Sweep Analysis:**
-- Tested K1 ∈ [0.1, 0.3, 0.5, 0.7] and K2 ∈ [0.05, 0.15, 0.25, 0.35]
-- Clustering quality ranges: 0.3-0.6 depending on parameters
-- More ants generally improve performance
-- Optimal parameters vary with grid configuration
-
-**Strengths:**
-- Stable and predictable behavior
-- Fast execution (no training required)
-- Interpretable rules
-- Consistent performance
-
-**Limitations:**
-- Fixed rules, no adaptation
-- Limited peak performance
-- Requires manual parameter tuning
+The approach demonstrates stable and predictable behavior with fast execution requiring no training, interpretable rules, and consistent performance. However, it suffers from fixed rules with no adaptation, limited peak performance, and requires manual parameter tuning.
 
 ---
 
 ### 2.2 RL Approach: Single-Color Clustering
 
-#### 2.2.1 Architecture
+The single-color clustering approach uses a multi-layer perceptron (MLP) policy network with 2 hidden layers of 128 units each, ReLU activation, and dropout (0.1), outputting action probability distributions over 7 actions. Training employs REINFORCE (Monte Carlo Policy Gradient) with Adam optimizer (learning rate 1e-3), discount factor γ = 0.99, entropy regularization 0.01, gradient clipping (max_norm = 1.0), and runs for 3000 episodes with 400 steps per episode.
 
-**Policy Network:**
-- MLP with 2 hidden layers (128 units each)
-- ReLU activation, dropout (0.1)
-- Output: Action probability distribution over 7 actions
-
-**Training:**
-- Algorithm: REINFORCE (Monte Carlo Policy Gradient)
-- Learning rate: 1e-3 (Adam optimizer)
-- Discount factor: γ = 0.99
-- Entropy regularization: 0.01
-- Gradient clipping: max_norm = 1.0
-- Episodes: 3000, Steps per episode: 400
-
-**Reward Structure:**
-```
-Total Reward = Global Reward + Auxiliary Reward
-
-Global Reward = (Δ clustering_score) × 100.0
-
-Auxiliary Rewards:
-- PICK: +0.5 (stray) or -1.5 (cluster break)
-- DROP: -1.0 (littering) or +1/+2/+4 (density bonus)
-```
-
-#### 2.2.2 Evaluation Strategy
-
-- **Training:** Stochastic action sampling (exploration)
-- **Evaluation:** Deterministic argmax (exploitation) every 50 episodes
-- Separate evaluation grids not seen during training
-
-#### 2.2.3 Results
+The reward structure combines global and auxiliary components: global reward equals the change in clustering score multiplied by 100.0, while auxiliary rewards provide +0.5 for picking strays, -1.5 for breaking clusters, -1.0 for littering, and +1/+2/+4 density bonuses for dropping near 1/2/3+ neighbors. During training, actions are sampled stochastically for exploration, while evaluation uses deterministic argmax every 50 episodes on separate grids not seen during training.
 
 ![RL 1-Color Results](RL_1Color.jpeg)
 
-**Performance Metrics:**
-- **Training Rewards:** Mean ~428.3, high variance
-- **Evaluation Rewards:** Highly oscillatory (0-500)
-  - Peaks: ~500 (favorable initializations)
-  - Valleys: ~100 (missed items due to limited exploration)
-- **Clustering Quality:** 
-  - Peaks: 0.85-0.95 (excellent clustering)
-  - Valleys: 0.5-0.6 (partial clustering)
-  - Final: 0.8537
-
-**Key Findings:**
-- ✅ Successfully learned clustering mechanics ("pick lonely, drop friendly")
-- ✅ Achieved high-quality clustering when items are found
-- ⚠️ Deterministic evaluation shows high variance (sawtooth pattern)
-- ⚠️ Limited exploration in deterministic mode causes missed items
-
-**Analysis:**
-The agent demonstrates mastery of clustering concepts but struggles with exploration in deterministic evaluation mode. The 3×3 vision limitation combined with deterministic search patterns creates a "blind spot" problem where items outside the search path are never discovered.
+Results show training rewards with mean ~428.3 and high variance, while evaluation rewards oscillate between 0-500 with peaks around 500 (favorable initializations) and valleys around 100 (missed items). Clustering quality peaks at 0.85-0.95 (excellent clustering) and valleys at 0.5-0.6 (partial clustering), with final quality of 0.8537. The agent successfully learned clustering mechanics ("pick lonely, drop friendly") and achieves high-quality clustering when items are found. However, deterministic evaluation shows high variance (sawtooth pattern) and limited exploration causes missed items. The 3×3 vision limitation combined with deterministic search patterns creates blind spots where items outside the search path are never discovered.
 
 ---
 
 ### 2.3 RL Approach: Multi-Color Sorting (Non-Deterministic)
 
-#### 2.3.1 Architecture
-
-Similar to single-color but adapted for multiple colors:
-- **Colors:** 3 (config) or 2 (notebook name suggests)
-- **Observation:** Larger input space due to multiple color encodings
-- **Evaluation:** Fully stochastic (no deterministic evaluation mode)
-
-#### 2.3.2 Key Differences
-
-- All actions use stochastic sampling (no deterministic evaluation)
-- Maintains exploration throughout training
-- Simpler training loop (no mode switching)
-
-#### 2.3.3 Results
+This approach adapts the single-color architecture for multiple colors (2-3 colors depending on configuration), resulting in a larger observation space due to multiple color encodings. The key difference is fully stochastic evaluation with no deterministic mode, meaning all actions use stochastic sampling throughout training. This maintains exploration continuously and simplifies the training loop by eliminating mode switching.
 
 ![RL 2-Color Non-Deterministic Results](RL_2Color_noDeterministic.jpeg)
 
-**Performance Metrics:**
-- **Training Rewards:** Mean ~30-35, high variance
-- **Clustering Quality:** 
-  - Initial: 0.3-0.4
-  - After ~400 episodes: 0.6-0.8
-  - Consistent improvement over time
-
-**Key Findings:**
-- ✅ More consistent than deterministic evaluation
-- ✅ Avoids sawtooth pattern
-- ✅ Better robustness across initializations
-- ⚠️ Lower peak performance (stochastic exploration)
-- ⚠️ Sorting quality lower than single-color clustering
-
-**Analysis:**
-The fully stochastic approach provides more consistent learning but trades off peak performance for robustness. The multi-color sorting task proves significantly harder than single-color clustering, with quality scores plateauing around 0.6-0.8 compared to 0.85-0.95 for single-color.
+Results show training rewards with mean ~30-35 and high variance. Clustering quality starts at 0.3-0.4, improves to 0.6-0.8 after approximately 400 episodes, and shows consistent improvement over time. The approach demonstrates more consistency than deterministic evaluation, avoids the sawtooth pattern, and shows better robustness across initializations. However, it achieves lower peak performance due to stochastic exploration, and sorting quality remains lower than single-color clustering. The fully stochastic approach trades peak performance for robustness, with multi-color sorting proving significantly harder than single-color clustering, plateauing around 0.6-0.8 compared to 0.85-0.95 for single-color.
 
 ---
 
 ### 2.4 RL Approach: Multi-Color Sorting (Deterministic with Momentum)
 
-#### 2.4.1 Architecture Innovation
+This approach introduces action memory (momentum) as an architectural innovation, storing the last action taken and including it as a one-hot encoding in the observation space. This enhancement breaks the symmetry of empty space and helps stabilize movement patterns. The observation space expands to include vision, match signals, and last action memory, with input size calculated as `(10 × (NUM_COLORS + 1)) + 9 + 7` features.
 
-**Action Memory (Momentum):**
-- Stores last action taken
-- Includes last action as one-hot encoding in observation
-- Breaks symmetry of empty space
-- Helps stabilize movement patterns
-
-**Observation Enhancement:**
-```
-Input Size = (10 × (NUM_COLORS + 1)) + 9 + 7
-           = Vision + Match Signals + Last Action Memory
-```
-
-#### 2.4.2 Training Configuration
-
-- **Colors:** 2
-- **Episodes:** 2500
-- **Steps per episode:** 400
-- **Evaluation:** Deterministic every 50 episodes
-- **Learning rate scheduler:** StepLR (step_size=800, gamma=0.5)
-
-#### 2.4.3 Results
+Training configuration uses 2 colors, 2500 episodes, 400 steps per episode, deterministic evaluation every 50 episodes, and a StepLR learning rate scheduler (step_size=800, gamma=0.5).
 
 ![RL 2-Color Deterministic with Momentum Results](RL_2Color_Deterministic_momentum.jpeg)
 
-**Performance Metrics:**
-- **Training Rewards:** Mean ~30-35, high variance (-20 to 60)
-- **Evaluation Rewards:** Highly variable (-100 to 110)
-  - Early episodes (0-200): ~0 to negative
-  - Mid episodes (300-600): Oscillates between -100 and +110
-  - Late episodes (900-1000): Stabilizes around +100
-- **Clustering Quality:**
-  - Training: 0.3-1.0, improves to 0.6-0.8
-  - Evaluation: 0.2-0.6, highly variable
-  - Final: 0.6087
-
-**Key Findings:**
-- ✅ Action memory helps break symmetry
-- ✅ Stabilizes movement patterns
-- ⚠️ Still shows high variance in deterministic evaluation
-- ⚠️ Sorting quality (0.31-0.61) significantly lower than clustering (0.85-0.95)
-- ⚠️ Task complexity gap evident
-
-**Analysis:**
-The momentum mechanism provides architectural improvement but doesn't fully solve the exploration problem in deterministic evaluation. The multi-color sorting task remains challenging, with quality scores indicating partial success but not complete color separation.
+Results show training rewards with mean ~30-35 and high variance (-20 to 60). Evaluation rewards are highly variable (-100 to 110), starting near zero or negative in early episodes (0-200), oscillating between -100 and +110 in mid episodes (300-600), and stabilizing around +100 in late episodes (900-1000). Clustering quality in training ranges from 0.3-1.0, improving to 0.6-0.8, while evaluation quality ranges from 0.2-0.6 with high variability, achieving a final quality of 0.6087. Action memory helps break symmetry and stabilizes movement patterns, but the approach still shows high variance in deterministic evaluation. Sorting quality (0.31-0.61) remains significantly lower than clustering (0.85-0.95), demonstrating the task complexity gap. The momentum mechanism provides architectural improvement but doesn't fully solve the exploration problem, with multi-color sorting remaining challenging and showing only partial success in color separation.
 
 ---
 
@@ -281,95 +90,27 @@ The momentum mechanism provides architectural improvement but doesn't fully solv
 
 ### 3.1 Task Complexity Gap
 
-**Observation:**
-- Single-color clustering: Quality 0.85-0.95 ✅
-- Multi-color sorting: Quality 0.31-0.61 ⚠️
-
-**Root Cause:**
-- Clustering requires grouping similar items (easier)
-- Sorting requires separating different colors into distinct clusters (harder)
-- Agent must learn color discrimination implicitly from global reward signal
-
-**Impact:**
-- Significant performance drop when moving from 1 to 2+ colors
-- Reward structure doesn't explicitly encourage color separation
-- Agent may create mixed-color clusters that still score well on global metric
+A significant performance gap exists between single-color clustering (quality 0.85-0.95) and multi-color sorting (quality 0.31-0.61). This gap stems from fundamental task differences: clustering requires grouping similar items, which is relatively straightforward, while sorting requires separating different colors into distinct clusters, which is substantially harder. The agent must learn color discrimination implicitly from the global reward signal, as the reward structure doesn't explicitly encourage color separation. This leads to a significant performance drop when moving from 1 to 2+ colors, and agents may create mixed-color clusters that still score well on the global metric without achieving true sorting.
 
 ### 3.2 Exploration-Exploitation Trade-off
 
-**Deterministic Evaluation Issues:**
-- High variance (sawtooth pattern)
-- Misses items outside search path
-- Limited exploration leads to suboptimal coverage
-- 3×3 vision creates "blind spots"
-
-**Stochastic Evaluation Trade-offs:**
-- Better exploration and consistency
-- Lower peak performance
-- Slower convergence
-- More robust across initializations
-
-**Challenge:**
-Finding the right balance between exploration (stochastic) and exploitation (deterministic) for evaluation.
+Deterministic evaluation exhibits high variance with a sawtooth pattern, misses items outside the search path, and suffers from limited exploration leading to suboptimal coverage. The 3×3 vision creates blind spots that exacerbate this problem. Stochastic evaluation provides better exploration and consistency with improved robustness across initializations, but trades off peak performance and slower convergence. The core challenge lies in finding the right balance between exploration (stochastic) and exploitation (deterministic) for evaluation, as each approach has distinct advantages and limitations.
 
 ### 3.3 Reward Structure Limitations
 
-**Current Reward:**
-- Global: Δ clustering_score (doesn't distinguish colors)
-- Auxiliary: Density-based shaping (color-agnostic)
-
-**Problems:**
-- Doesn't explicitly penalize mixed-color clusters
-- Doesn't reward color-specific clustering
-- Agent must infer color separation from global signal
-- May converge to suboptimal mixed-color solutions
-
-**Solution Needed:**
-Color-aware reward structure that explicitly encourages color separation.
+The current reward structure uses a global component based on change in clustering score that doesn't distinguish colors, combined with auxiliary density-based shaping that is color-agnostic. This design doesn't explicitly penalize mixed-color clusters or reward color-specific clustering, forcing the agent to infer color separation from the global signal. As a result, agents may converge to suboptimal mixed-color solutions that achieve high clustering scores without proper color separation. A color-aware reward structure that explicitly encourages color separation is needed to address this limitation.
 
 ### 3.4 Vision Limitations
 
-**Current:** 3×3 local neighborhood (9 cells)
-
-**Challenges:**
-- Limited global awareness
-- Cannot see distant clusters
-- Difficult to plan long-term paths
-- May get stuck in local optima
-
-**Potential Solutions:**
-- Larger vision radius (5×5, 7×7)
-- Memory mechanisms (LSTM, attention)
-- Hierarchical planning
+The 3×3 local neighborhood (9 cells) provides limited global awareness, preventing agents from seeing distant clusters and making it difficult to plan long-term paths. This constraint may cause agents to get stuck in local optima. Potential solutions include expanding the vision radius (5×5, 7×7), implementing memory mechanisms such as LSTM or attention, or developing hierarchical planning approaches that enable better spatial reasoning.
 
 ### 3.5 Evaluation Methodology
 
-**Deterministic Evaluation Variance:**
-- Same policy, different initializations → vastly different results
-- Indicates sensitivity to starting conditions
-- Makes performance assessment difficult
-
-**Stochastic Evaluation Consistency:**
-- More consistent but doesn't show best-case performance
-- Harder to assess convergence
-- May mask underlying policy quality
-
-**Challenge:**
-Developing evaluation methodology that balances consistency with performance assessment.
+Deterministic evaluation shows high variance where the same policy produces vastly different results across different initializations, indicating sensitivity to starting conditions and making performance assessment difficult. Stochastic evaluation provides more consistency but doesn't reveal best-case performance, makes convergence assessment harder, and may mask underlying policy quality. The challenge is developing an evaluation methodology that balances consistency with accurate performance assessment, as current approaches either sacrifice consistency for peak performance or sacrifice peak performance for consistency.
 
 ### 3.6 Training Stability
 
-**Observations:**
-- High variance in training rewards
-- Oscillatory evaluation metrics
-- Slow convergence for multi-color tasks
-- Sensitive to hyperparameters
-
-**Contributing Factors:**
-- Sparse rewards (only when clustering improves)
-- Long episode length (400 steps)
-- Credit assignment problem
-- Exploration-exploitation balance
+Training exhibits high variance in rewards, oscillatory evaluation metrics, slow convergence for multi-color tasks, and sensitivity to hyperparameters. Contributing factors include sparse rewards that only occur when clustering improves, long episode lengths (400 steps) that complicate credit assignment, and the inherent difficulty of balancing exploration and exploitation. These factors combine to create unstable training dynamics that require careful hyperparameter tuning and extended training periods to achieve convergence.
 
 ---
 
@@ -386,88 +127,18 @@ Developing evaluation methodology that balances consistency with performance ass
 
 ### 4.2 Architectural Innovations
 
-**Match Signals:**
-- Help identify where to drop items
-- Provide local clustering guidance
-- Successfully integrated into observation space
-
-**Action Memory (Momentum):**
-- Breaks symmetry of empty space
-- Stabilizes movement patterns
-- Modest improvement but doesn't solve core challenges
-
-**Reward Shaping:**
-- Density bonuses guide clustering behavior
-- Effective for single-color clustering
-- Insufficient for multi-color sorting
+Several architectural innovations were explored throughout the project. Match signals help identify where to drop items and provide local clustering guidance, successfully integrated into the observation space. Action memory (momentum) breaks the symmetry of empty space and stabilizes movement patterns, though it provides only modest improvement and doesn't solve core challenges. Reward shaping through density bonuses effectively guides clustering behavior for single-color tasks but proves insufficient for multi-color sorting, highlighting the need for color-aware reward components.
 
 ### 4.3 Key Insights
 
-1. **Clustering vs. Sorting:** Clear complexity gap demonstrates that sorting is fundamentally harder than clustering.
-
-2. **Evaluation Mode Matters:** Deterministic evaluation shows best-case performance but high variance; stochastic evaluation shows consistency but lower peaks.
-
-3. **Reward Design Critical:** Current reward structure works for clustering but insufficient for sorting; color-aware rewards needed.
-
-4. **Exploration Essential:** Limited exploration in deterministic mode causes performance degradation; stochastic exploration improves robustness.
-
-5. **Vision Limitations:** 3×3 vision creates blind spots; larger vision or memory needed for better performance.
+The comparative analysis reveals several critical insights. First, a clear complexity gap demonstrates that sorting is fundamentally harder than clustering, with performance dropping significantly when moving from single-color to multi-color tasks. Second, evaluation mode matters significantly: deterministic evaluation shows best-case performance but high variance, while stochastic evaluation shows consistency but lower peaks. Third, reward design is critical, as the current structure works for clustering but is insufficient for sorting, necessitating color-aware rewards. Fourth, exploration is essential, as limited exploration in deterministic mode causes performance degradation, while stochastic exploration improves robustness. Finally, vision limitations are evident, as 3×3 vision creates blind spots, indicating that larger vision or memory mechanisms are needed for better performance.
 
 ---
 
 ## 5. Conclusion
 
-This project successfully demonstrates learning-based approaches to ant sorting, achieving high-quality clustering (0.85-0.95) for single-color tasks. However, multi-color sorting proves significantly more challenging, with quality scores ranging from 0.31-0.61. 
+This project successfully demonstrates learning-based approaches to ant sorting, achieving high-quality clustering (0.85-0.95) for single-color tasks using REINFORCE policy gradient methods. The main contributions include successful RL implementation demonstrating that REINFORCE can learn effective clustering policies, architectural innovations such as match signals and action memory that improve performance, comprehensive comparative analysis of rule-based and learning-based approaches, and identification of key limitations in reward structure, exploration, and evaluation methodologies.
 
-### 5.1 Main Contributions
+However, multi-color sorting proves significantly more challenging, with quality scores ranging from 0.31-0.61, revealing a substantial complexity gap between clustering and sorting tasks. RL agents successfully learn clustering mechanics for single-color scenarios, but deterministic evaluation shows high variance, and the current reward structure lacks color-aware components necessary for effective multi-color sorting. The gap between clustering (0.85-0.95) and sorting (0.31-0.61) performance underscores the need for improved reward structures and exploration strategies.
 
-1. **Successful RL Implementation:** Demonstrated that REINFORCE can learn effective clustering policies
-2. **Architectural Innovations:** Match signals and action memory improve performance
-3. **Comparative Analysis:** Comprehensive comparison of rule-based and learning-based approaches
-4. **Challenge Identification:** Identified key limitations in reward structure, exploration, and evaluation
-
-### 5.2 Key Findings
-
-- ✅ RL agents successfully learn clustering mechanics
-- ✅ Single-color clustering achieves excellent performance (0.85-0.95)
-- ⚠️ Multi-color sorting remains challenging (0.31-0.61)
-- ⚠️ Deterministic evaluation shows high variance
-- ⚠️ Reward structure needs color-aware components
-
-### 5.3 Future Directions
-
-1. **Color-Aware Rewards:** Design rewards that explicitly penalize mixed-color clusters and reward color separation
-2. **Improved Exploration:** Develop hybrid exploration strategies combining stochastic and deterministic approaches
-3. **Enhanced Vision:** Experiment with larger vision radii or memory mechanisms
-4. **Curriculum Learning:** Gradually increase task complexity (colors, grid size)
-5. **Multi-Agent Coordination:** Explore communication or coordination mechanisms between agents
-
-### 5.4 Final Remarks
-
-The project successfully demonstrates the feasibility of learning-based ant sorting while highlighting the significant challenges in multi-color sorting tasks. The gap between clustering (0.85-0.95) and sorting (0.31-0.61) performance underscores the need for improved reward structures and exploration strategies. Future work should focus on color-aware reward design and enhanced exploration mechanisms to bridge this performance gap.
-
----
-
-## References
-
-1. Deneubourg, J. L., et al. (1991). "The dynamics of collective sorting robot-like ants and ant-like robots." *Proceedings of the first international conference on simulation of adaptive behavior on From animals to animats*.
-
-2. Williams, R. J. (1992). "Simple statistical gradient-following algorithms for connectionist reinforcement learning." *Machine learning*, 8(3-4), 229-256.
-
-3. Sutton, R. S., & Barto, A. G. (2018). *Reinforcement learning: An introduction*. MIT press.
-
----
-
-## Appendix: Additional Results
-
-### Rule-Based Baseline Visualizations
-
-![Clustering Quality Over Time](results/clustering_quality.png)
-
-![Final Grid State (1-Color)](results/final_grid_1_color.png)
-
-![Clustering Quality (1-Color)](results/clustering_quality_1_color.png)
-
-![Metrics Facet Grid](results/metrics_facet_grid.png)
-
----
+Future work should focus on several key directions: designing color-aware rewards that explicitly penalize mixed-color clusters and reward color separation, developing hybrid exploration strategies combining stochastic and deterministic approaches, experimenting with larger vision radii or memory mechanisms to address vision limitations, implementing curriculum learning to gradually increase task complexity, and exploring communication or coordination mechanisms between multiple agents. These improvements are essential to bridge the performance gap and achieve robust multi-color sorting capabilities in learning-based ant systems.
