@@ -1,55 +1,42 @@
 """
 Metrics for tracking clustering quality in the ant sorting simulation.
 """
-import numpy as np
 
 
-def calculate_clustering_quality(grid):
+def calculate_clustering_score(grid):
     """
-    Calculate clustering quality score μ′.
-    
-    The score measures how well objects of the same color are clustered together.
-    Higher values indicate better clustering.
-    
-    Formula: For each colored object, calculate the fraction of its neighbors
-    that have the same color. Average this across all objects.
-    
+    Calculate how well the items are clustered on a given grid.
+
+    Formula: Sum of adjacent matching pairs / Total items
+    This provides the Global Reward signal.
+
     Args:
-        grid (GridWorld): The grid world to evaluate
-        
+        grid (Grid): The grid world to evaluate
+
     Returns:
-        float: Clustering quality score μ′ (0.0 to 1.0)
+        float: Clustering score (0.0 to 1.0), where higher values indicate better clustering
     """
-    similarities = []
-    
-    for r in range(grid.height):
-        for c in range(grid.width):
-            color = grid.get(r, c)
-            if color != 0:  # If cell has an object
-                similarity = grid.get_local_similarity(r, c, color)
-                similarities.append(similarity)
-    
-    if not similarities:
+    score = 0
+    h, w = grid.cells.shape
+    total_items = 0
+
+    for y in range(h):
+        for x in range(w):
+            val = grid.cells[y, x]
+            if val == 0:
+                continue
+            total_items += 1
+
+            # Check right neighbor
+            if x + 1 < w and grid.cells[y, x + 1] == val:
+                score += 1
+            # Check down neighbor
+            if y + 1 < h and grid.cells[y + 1, x] == val:
+                score += 1
+
+    if total_items == 0:
         return 0.0
-    
-    return np.mean(similarities)
 
-
-def calculate_color_distribution(grid):
-    """
-    Calculate the distribution of colors across the grid.
-    
-    Args:
-        grid (GridWorld): The grid world to evaluate
-        
-    Returns:
-        dict: Dictionary mapping color -> count
-    """
-    distribution = {}
-    for r in range(grid.height):
-        for c in range(grid.width):
-            color = grid.get(r, c)
-            if color != 0:
-                distribution[color] = distribution.get(color, 0) + 1
-    return distribution
-
+    # Normalize by total items to keep reward magnitude consistent
+    # regardless of how full the grid is.
+    return score / total_items

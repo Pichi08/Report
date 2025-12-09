@@ -1,151 +1,145 @@
 """
-2D Bounded Grid World for Ant Sorting Simulation
+Grid class for the ant sorting simulation.
+Represents the 2D environment where ants move and sort colored items.
 """
+
 import numpy as np
 import random
 
 
-class GridWorld:
+class Grid:
     """
-    A 2D bounded grid world where ants can move and sort colored objects.
-    Edges do not wrap around - borders are boundaries.
-    
+    Represents the 2D environment of items.
+
     Attributes:
-        height (int): Grid height
         width (int): Grid width
-        num_colors (int): Number of different colors (K)
-        grid (np.ndarray): 2D array where 0 = empty, 1-K = colored objects
-        empty_cells (set): Set of (row, col) tuples for empty cells
+        height (int): Grid height
+        cells (np.ndarray): 2D array where 0 = empty, 1-K = colored objects
+        num_colors (int): Number of different colored object types
     """
-    
-    def __init__(self, height, width, num_colors, fill_percentage):
+
+    def __init__(self, width, height, num_colors, fill_percentage=0.4):
         """
-        Initialize the grid world.
-        
+        Initialize the grid.
+
         Args:
-            height (int): Grid height (H)
-            width (int): Grid width (W)
-            num_colors (int): Number of colors (K) to scatter
-            fill_percentage (float): Percentage of blocks (p%) to populate (0-100)
+            width (int): Grid width
+            height (int): Grid height
+            num_colors (int): Number of colors
+            fill_percentage (float): Probability of filling each cell (0.0 to 1.0)
         """
-        self.height = height
         self.width = width
+        self.height = height
+        self.cells = np.zeros((height, width), dtype=int)  # Empty grid
         self.num_colors = num_colors
-        self.grid = np.zeros((height, width), dtype=int)
-        
-        # Calculate number of objects to place
-        total_cells = height * width
-        num_objects = int(total_cells * fill_percentage / 100.0)
-        
-        # Distribute objects roughly evenly across colors
-        objects_per_color = num_objects // num_colors
-        remainder = num_objects % num_colors
-        
-        # Place objects
-        all_positions = [(r, c) for r in range(height) for c in range(width)]
-        random.shuffle(all_positions)
-        
-        pos_idx = 0
-        for color in range(1, num_colors + 1):
-            count = objects_per_color + (1 if color <= remainder else 0)
-            for _ in range(count):
-                if pos_idx < len(all_positions):
-                    r, c = all_positions[pos_idx]
-                    self.grid[r, c] = color
-                    pos_idx += 1
-        
-        # Track empty cells
-        self.empty_cells = set()
-        for r in range(height):
-            for c in range(width):
-                if self.grid[r, c] == 0:
-                    self.empty_cells.add((r, c))
-    
-    def is_valid(self, row, col):
-        """Check if a position is within grid bounds."""
-        return 0 <= row < self.height and 0 <= col < self.width
-    
-    def get(self, row, col):
+        self._populate(fill_percentage)  # Populate the empty grid
+
+    def get(self, x, y):
         """
-        Get the value at a position (bounded, no wrapping).
-        
+        Get the value at a position.
+
         Args:
-            row (int): Row index
-            col (int): Column index
-            
+            x (int): Column index
+            y (int): Row index
+
         Returns:
-            int: Grid value (0 = empty, 1-K = colored object), or 0 if out of bounds
+            int: Grid value (0 = empty, 1-K = colored object)
         """
-        if not self.is_valid(row, col):
-            return 0
-        return self.grid[row, col]
-    
-    def set(self, row, col, value):
+        return self.cells[y, x]
+
+    def _populate(self, fill_percentage):
         """
-        Set the value at a position (bounded, no wrapping).
-        
+        Populate the grid with a certain fill percentage.
+
         Args:
-            row (int): Row index
-            col (int): Column index
-            value (int): Value to set (0 = empty, 1-K = colored object)
+            fill_percentage (float): Probability of filling each cell (0.0 to 1.0)
         """
-        if not self.is_valid(row, col):
-            return
-        old_value = self.grid[row, col]
-        self.grid[row, col] = value
-        
-        # Update empty cells set
-        if old_value != 0 and value == 0:
-            self.empty_cells.add((row, col))
-        elif old_value == 0 and value != 0:
-            self.empty_cells.discard((row, col))
-    
-    def is_empty(self, row, col):
-        """Check if a cell is empty."""
-        return self.get(row, col) == 0
-    
-    def get_neighbors(self, row, col, radius=1):
+        for y in range(self.height):
+            for x in range(self.width):
+                if random.random() < fill_percentage:
+                    self.cells[y, x] = random.randint(1, self.num_colors)
+
+    def move_ant(self, ant, dx, dy):
         """
-        Get neighboring cells (bounded, no wrapping).
-        Only returns neighbors that are within grid bounds.
-        Corner cells have 3 neighbors, edge cells have 5, interior cells have 8.
-        
+        Move an ant if possible given the grid width and height.
+
         Args:
-            row (int): Row index
-            col (int): Column index
+            ant (Ant): The ant to move
+            dx (int): Change in x direction
+            dy (int): Change in y direction
+
+        Returns:
+            bool: True if move was successful, False otherwise
+        """
+        nx, ny = ant.x + dx, ant.y + dy
+        if 0 <= nx < self.width and 0 <= ny < self.height:
+            ant.x, ant.y = nx, ny
+            return True
+        return False
+
+    def pick_item(self, ant):
+        """
+        Let an ant pick up an item if possible.
+        Can only pick if: Cell has item AND Ant hands are empty.
+
+        Args:
+            ant (Ant): The ant attempting to pick
+
+        Returns:
+            bool: True if item was picked, False otherwise
+        """
+        if self.cells[ant.y, ant.x] != 0 and ant.carrying is None:
+            ant.carrying = self.cells[ant.y, ant.x]
+            self.cells[ant.y, ant.x] = 0
+            return True
+        return False
+
+    def drop_item(self, ant):
+        """
+        Let an ant drop an item if possible.
+        Can only drop if: Cell is empty AND Ant has item.
+
+        Args:
+            ant (Ant): The ant attempting to drop
+
+        Returns:
+            bool: True if item was dropped, False otherwise
+        """
+        if self.cells[ant.y, ant.x] == 0 and ant.carrying is not None:
+            self.cells[ant.y, ant.x] = ant.carrying
+            ant.carrying = None
+            return True
+        return False
+
+    def get_local_similarity(self, x, y, value, radius=1):
+        """
+        Get the similarity of a value and the neighborhood of one coordinate.
+        Calculates the fraction of neighbors with the same color.
+
+        Args:
+            x (int): Column index
+            y (int): Row index
+            value (int): Color value to check similarity for
             radius (int): Neighbor radius (default 1 for 8 neighbors)
-            
-        Returns:
-            list: List of (row, col, value) tuples for valid neighbors
-        """
-        neighbors = []
-        for dr in range(-radius, radius + 1):
-            for dc in range(-radius, radius + 1):
-                if dr == 0 and dc == 0:
-                    continue
-                r = row + dr
-                c = col + dc
-                # Only add if within bounds
-                if self.is_valid(r, c):
-                    neighbors.append((r, c, self.grid[r, c]))
-        return neighbors
-    
-    def get_local_similarity(self, row, col, color):
-        """
-        Calculate local similarity: fraction of neighbors with the same color.
-        
-        Args:
-            row (int): Row index
-            col (int): Column index
-            color (int): Color to check similarity for
-            
+
         Returns:
             float: Fraction of neighbors with matching color (0.0 to 1.0)
         """
-        neighbors = self.get_neighbors(row, col)
-        if not neighbors:
-            return 0.0
-        
-        matching = sum(1 for _, _, val in neighbors if val == color)
-        return matching / len(neighbors)
-
+        count_same = 0
+        count_total = 0
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if dx == 0 and dy == 0:
+                    continue  # skip center cell
+                nx = x + dx
+                ny = y + dy
+                # Bounds check
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    neighbor_val = self.get(nx, ny)
+                    if neighbor_val != 0:
+                        count_total += 1
+                        if neighbor_val == value:
+                            count_same += 1
+        if count_total == 0:
+            return 0
+        return count_same / count_total
